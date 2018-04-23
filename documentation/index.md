@@ -1,29 +1,53 @@
 
-#Flashing the LB6M to a Brocade TurboIron 24X
 
-##Disclaimer & Caveats
-We are not responsible for any damaged devices or property resulting from this guide. This guide assumes you own a legitimate Brocade TurboIron and therefore have rights to the firmware & its use.
-Two things will also change due to hardware differences:
 
-* The SFP+ activity/status LEDs stop doing anything. The copper ports and chassis LEDs continue to work as normal. The Quanta uses a CPLD to multiplex the LED signals, while the brocade uses native CPU I/O. There's no way around this difference.
 
-* The Brocade only has one Out Of Band management port. Your #2 OOB port will no longer do anything. You'll still have OOB management as usual on mgmt #1, and of course in-band management on all the normal ports.
+
+
+
+
+
+# Flashing the LB6M to a Brocade TurboIron 24X
+
+## Disclaimer & Caveats
+We are not responsible for any damaged devices or property resulting from this guide. This guide assumes you own a legitimate Brocade TurboIron and therefore have rights to the firmware & its use. The software itself requires no license or activation to fully function, but legally you need the rights to the firmware. Some things will also change due to hardware differences:
+
+* The SFP+ port activity/status LEDs stop doing anything. The copper ports and chassis LEDs continue to work as normal. The Quanta uses a CPLD to multiplex the LED signals, while the Brocade uses native CPU I/O. There's no way around this difference.
+
+* The Brocade only has one Out Of Band management port, so the code is only aware of the #1 OOB port. The #2 management port will no longer do anything. 
+* Due to a difference in PCB trace layout for the management port PHY, the management-only port may link at slower speeds than it did under Fastpath (eg at 100mbit). In a rare case, we saw it stop linking altogether until a software revert. For more information, please [click here](http://brokeaid.com/mgmt/). This only affects the management port. All other ports, including copper ports function perfectly. In-band management functions perfectly, it is only the OOB port PHY affected.
+* If you don't like the Brocade OS, or have other issues, you can always flash back to 100% stock Fastpath using the revert guide to the left, so none of this is permanent.  
 
 If you're looking to purchase an LB6M, we recommend [UnixPlus](https://www.unixplus.com/products/quanta-lb6m-24-port-10gbe-sfp-4x-1gbe-l2-l3-switch) - their stock is all brand new and of known origin.
-##Prerequisites
+## Prerequisites
 
-This guide assumes you're familiar with the basics like tftp, obtaining a serial console to the device, etc. If you're not, this guide is probably not for you. Before touching your switch, read this document from beginning to end to get a basic idea of what you'll be doing - do **not** skip this step.  
+This guide assumes you're familiar with the basics like TFTP, obtaining a serial console to the device, etc. If you're not, this guide is probably not for you. Before touching your switch, read this document from beginning to end to get a basic idea of what you'll be doing - do **not** skip this step.  
 
-The risk of doing this is low and mitigated if you're properly prepared and follow closely. It's a good idea to have the switch on a UPS while you do this, if you lose power after the ```erase``` command before you've flashed the new bootloader, your device will be bricked (however it can be recovered with a PowerPC capable JTAG unit).  
+The risk of doing this is mitigated if you're prepared and follow closely. It's a good idea to have the switch on a UPS while you do this, if you lose power after the ```erase``` command before you've flashed the new bootloader, your device will be bricked (however it can be recovered with a PowerPC capable JTAG unit).  
 
-Firstly grab this [Brocade Firmware Zip](http://brokeaid.com/files/Brocade-TI.zip) - it contains your bootloader, OS, and all the documentation you'll need. We're not promising it will be available here long, so keep it somewhere safe. If you redistribute it, please do not exclude or rename any files (keep it complete).  
+Download the firmware ZIP below. It contains your bootloader, OS, and all the documentation you'll need.  
 
-Start a tftp server and make sure both ```brocadeboot.bin``` and ```brocadeimage.bin``` are being served by it. They can be found in the ```Main Flash``` folder.  
+[```Brocade Firmware Zip```](http://brokeaid.com/files/Brocade-TI.zip)  
+```Zip Updated: 03-01-2018```  
+```MD5: 44e00c38d996c2dfa33cda264b6be070```  
 
-Connect to the serial console  port on the switch and open a terminal window (9600 8N1). Also be sure to connect the #1 management port on the switch to a network that has layer 2 access to your tftp server, so it can succesfully retrieve them while in u-boot.
+Connect to the serial console  port on the switch and open a terminal window (9600 8N1). Also be sure to connect the #1 management port on the switch to a network that has layer 2 access to your tftp server.
+
+## Image Selection
+You need to decide which image you want to flash. There are two codetrains for this switch - v7 and v8. v8 is the "latest and greatest", and technically a beta release. However v7 is the "LTS" branch and has had more QA and more bug fixes (several months worth) compared to v8.  
+
+In 90% of cases, I recommend using the v7 codetrain. The v8 has one known issue already (severe LACP flapping in an STP environment), while the v7 image is flawless. Keep in mind both versions have the same L2/L3 features - so you're not missing out on anything using v7.
+
+Once you decide which version to use, you need to decide between the L2 and L3 image. The Layer 3 image is the full OS including everything - all routing protocols as well as all L2 features. This is what should be used in 99% of cases, especially if you want to use the config guide on this site. The L2 image is layer 2 switching only. If you have a special case where this is needed, it's included.  
+
+**Note:** In 99% of cases, you should choose the v7 layer 3 image. If you're unsure about anything, use this version.
+
+Now that you've chosen, copy ```brocadeboot.bin``` from the Bootloader folder to your TFTP server root directory. Then take whatever OS image you decided upon, and rename it to ```brocadeimage.bin``` - this ensures all the commands in this guide match. Put your new ```brocadeimage.bin``` on your TFTP server as well. If you're on windows and need a temporary TFTP server, I recommend [Tftpd32 Portable Edition](http://tftpd32.jounin.net/tftpd32_download.html).
 
 
-##Flash Preparation 
+
+
+## Flash Preparation 
 
 Reboot the switch while watching the serial output, it should prompt you to hit any key (do so) to interrupt boot and drop you into the u-boot console, which should look like this:
 
@@ -32,7 +56,7 @@ Reboot the switch while watching the serial output, it should prompt you to hit 
 ```
 
 With all the following commands, copy and paste them *exactly* as you see them. Do not try to manually type them. 
-After 50+ successful flashes, we had our first report of a brick. It was from someone trying to manually type each command, and mistaking a "O" for a "0". Copy and paste only!   
+After 50+ successful flashes, the first brick was a result of a typo from someone trying to manually type.
 
 Use the memory read command to verify your Quanta bootloader is where it should be - this ensures the commands to follow will use the correct location:
 
@@ -57,7 +81,6 @@ If the output on your switch does not match this exactly, **STOP!** Pastebin you
 
 Carrying on, assuming your ```md``` output matched ours: It's time to load in the Brocade bootloader to a safe temporary location in RAM. You also need to set a temporary IP for the switch, as well as set the IP of your tftp server destination:  
 
-Give the switch a unique IP (it will only be used for this bootloader session), as well as the IP of your tftp server:
 ```
 setenv ipaddr 192.168.1.50
 setenv serverip 192.168.1.49
@@ -102,7 +125,7 @@ The output should match the below exactly:
 ```
 If it doesn't match, **STOP**. You can safely reboot back to Quanta by typing ```reset``` or power cycling it. If you'd like, pastebin the output and get in touch with us on ServeTheHome. If it does match, continue on.
 
-##Erasing and replacing the bootloader
+## Erasing and replacing the bootloader
 
 You now have the Brocade bootloader we need stored in RAM. We need to erase the existing bootloader, then copy the Brocade loader from that RAM address to the bootloader address. From here on, be incredibly careful, and follow the commands exactly.  
 
@@ -140,11 +163,9 @@ fff80070: 00000000 00000000 00000000 00000000    ................
 
 If it matches, continue on to **Booting Brocade** below - the risky part is over. However if it doesn't, don't panic. Does it match the output you got earlier when you ran ```md 0xfff80000 20``` at the beginning of this guide? If so, that means the Quanta bootloader is still there. Either you didn't properly disable write protection, or something else has gone wrong. You can reboot into Quanta like normal, and contact us on the forums. 
 
-However if it matches neither, something has failed. We have yet to see this, but just in case you do -  be sure you're running the exact commands here, and do the guide again from ```tftpboot 0x100000 brocadeboot.bin``` and onwards until you get the bootloader where it should be. If you follow the commands, it should work.  
+However if it matches neither, something has failed. We have yet to see this, but just in case you do -  be sure you're running the exact commands here, and do the guide again from ```tftpboot 0x100000 brocadeboot.bin``` and onwards until you get the bootloader where it should be. If you follow the commands, it should work.  **Do not reboot or pull power until this is resolved.**  
 
-**Do not reboot or pull power until this is resolved.** If there is not a valid bootloader in that location, it will not boot itself. As a last resort you can try flashing the quanta bootloader back by substituting the uboot.bin in the ```Fastpath Revert``` folder in all the commands mentioning brocadeboot.bin - just use uboot.bin instead. If successful, the output of  ```md 0xfff80000 20``` should match the example at the beginning of this guide, then you can reboot.
-
-##Booting Brocade
+## Booting Brocade
 You now have the Brocade bootloader in the proper section of the PowerPC flash. Now we just need to reboot! 
 
 ```
@@ -155,51 +176,30 @@ It will reboot into the Brocade bootloader which should drop you at a prompt sim
 ```
 Monitor>
 ```
- In the Brocade software, over serial or telnet, you need to use shift+backspace to backspace. You can remedy this by changing your Putty/terminal settings to "Control+H" for backspace method under Terminal>Keyboard and backspace won't require shift. Once you get it up and running, you can also configure SSH which uses normal backspaces.  
+ In the Brocade software, over serial or telnet, you need to use shift+backspace to backspace. You can remedy this by changing your Putty/terminal settings to "Control+H" for backspace method under Terminal>Keyboard and backspace won't require shift.  
 
-Firstly boot the OS image via tftp. You need to first give the bootloader a temporary unique IP, then boot the firmware file using the IP address of your tftp server:
+First we need to give the bootloader a temporary IP, then reflash the bootloader using Brocade's flash routine. This fixes the boot sector flash permissions:
 ```
 ip address 192.168.1.50/24
-boot system tftp 192.168.1.49 brocadeimage.bin
+copy tftp flash 192.168.1.49 brocadeboot.bin boot
 ```
-
-It will now boot into the full Brocade firmware, however we still need to actually flash it to the device flash as well as fix flash permissions by re-flashing the bootloader using Brocade's official flashing routine.  
-  
-First give the management interface an address so it can contact your tftp server:
+After a few seconds it should complete the flashing process. Now that the boot sector matches stock, we can flash the main OS:
 ```
-enable
-conf t
-int management 1
-ip addr 192.168.1.50/24
-exit
-write mem
-exit
-```
-Reflash the bootloader using Brocade's flash routine to fix permissions, substitute the IP with your tftp server:
-```
-copy tftp flash 192.168.1.49 brocadeboot.bin bootrom
-```
-You should see some dots as it flashes - after they stop moving, wait 30 seconds or so and hit enter to return to the prompt. Reboot the switch so the new bootloader fixes perms - you won't be able to write to flash until you do this:
-```
-reload
-```
-
-It will reboot to the bootloader because we still haven't flashed the OS. Just like above, temporarily tftp-boot the OS:
-```
-ip address 192.168.1.50/24
-boot system tftp 192.168.1.49 brocadeimage.bin
-```
-If your management IP config from earlier didn't save, you'll need to redo those steps to give it an IP again. Now load and write the firmware:
-```
-enable
 copy tftp flash 192.168.1.49 brocadeimage.bin primary
 ```
-You'll see some dots as it flashes like before, when they stop hit enter to return to the prompt. It now perfectly matches a stock Brocade TurboIron. Reboot and it will come up on it's own like a stock device:
+
+Your switch is now fully flashed to Brocade. To boot into the OS for the first time run the following:
 ```
-reload
+boot system flash primary
 ```
 
-That's it! This first official boot will take a few minutes as it copies the primary image to the backup secondary image partition. You can ditch the serial cable and telnet to the management IP. If you want to use SSH, you'll need to enable it - follow the included Brocade docs or the Quick Guide on the left.  
+That's it! This first official boot will take a few minutes as it copies the primary image to the backup secondary image partition. The bootloader still has not been re-run since we reflashed it using Brocade's routine, so it's a good idea to make that happen by reloading the switch once it finishes booting:
+
+```
+enable
+reload
+```
+The switch will completely reboot, re-initializing the brocade bootloader, and you're ready to go. To ditch the serial cable and telnet/SSH to the switch, follow the [L3 Quick Guide](http://brokeaid.com/config/) on this site to give it an IP.
 
 Some commands to check out your new system:
 
@@ -209,9 +209,25 @@ show flash
 show chassis
 show media
 ```
-This is the full layer 3 image that ships with all features enabled, so please follow the included guides in the Documentation folder to configure your new switch. A quick guide is available on the left, but this site is not a substitute for learning Brocade's documentation.
+Please check out and follow the included guides in the Documentation folder to configure your new switch. A quick guide is available on the left, but this site is not a substitute for learning Brocade's documentation.
 
-##SFP+ Information
+## Fixing The MAC Address
+
+Flashing the switch resets the base MAC address to a default 00e0.5200.0100 - on its own this isn't a problem, but if you connect multiple flashed switches you're going to have serious collision issues. We highly recommend taking the extra minute to follow the [MAC Reset Guide](http://brokeaid.com/mac/).
+
+## Fan Speeds
+The Brocade firmware has the ability to set fan speeds and quiet it down. [This video](https://www.youtube.com/watch?v=QbMITnNv2FM) shows the audible difference. The OS has 3 fan speeds it automatically cycles through as temperature rises and falls. To bypass this and lock the fan speeds at the lowest level, run the below once the switch has booted into the OS:
+```
+enable
+conf t
+fan-speed 1
+write memory
+```
+Take a look at the output of ```show chassis``` and make sure your temperatures are below the indicated warning level. For 90% of environments, ```fan-speed 1``` will still keep it plenty cool.  
+
+If you'd like to get more advanced, there's also the ```fan-threshold``` command, which allows you to customize the temperature thresholds for each fan level, instead of locking it to one speed - but that's beyond this guide. 
+
+## SFP+ Information
 
 Brocade does not restrict the use of optics by manufacturer, they'll take anything given it's the right protocol. However optical monitoring information is disabled unless it sees Brocade or Foundry optics.  
 
@@ -227,13 +243,12 @@ telnet@Route2(config)#sh optic 5
 You'll need to pick up some official Brocade or Foundry optics on ebay, or buy some flashed optics from FiberStore.
 
 
-
-###Thanks:
+### Thanks:
 [**Jon Sands**](http://fohdeesha.com/)  
 [**Bengt-Erik Norum**](http://amateurfoundation.org/)  
 **fvanlint** from STH for being our first method tester
 
-###Contributing:
+### Contributing:
 The markdown source for these guides is hosted on [**our Github repo.**](https://github.com/Fohdeesha/quanta-brocade) If you have any suggested changes or additions feel free to submit a pull request.  
 
-```Documentation version:``` [ v1.8 (01-29-18)](https://github.com/Fohdeesha/quanta-brocade/commits/master) 
+```Documentation version:``` [ v3.1 (04-07-18)](https://github.com/Fohdeesha/quanta-brocade/commits/master) 
